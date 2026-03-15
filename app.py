@@ -4,36 +4,37 @@ import os
 import random
 import json
 
-# --- 1. 基礎設定與數據同步 ---
+# --- 1. 核心數據持久化邏輯 ---
 st.set_page_config(page_title="網球專業對撞與戰績系統", layout="wide")
 
 TODAY_PLAYERS_FILE = "today_players.csv"
 LINEUPS_FILE = "lineups_storage.csv"
 CONFIG_FILE = "match_config.json"
-RESULTS_FILE = "results_storage.csv" # 新增：存放比分
+RESULTS_FILE = "results_storage.csv"
 
-def save_config(match_list, team_codes, is_locked):
-    with open(CONFIG_FILE, 'w') as f:
-        json.dump({"match_list": match_list, "team_codes": team_codes, "is_locked": is_locked}, f)
+# 確保配置文件讀寫穩定
+def save_config_to_file(data):
+    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False)
 
-def load_config():
+def load_config_from_file():
     if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, 'r') as f: return json.load(f)
+        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
     return {"match_list": [], "team_codes": {}, "is_locked": False}
 
-config = load_config()
-if 'match_list' not in st.session_state: st.session_state.match_list = config["match_list"]
-if 'team_codes' not in st.session_state: st.session_state.team_codes = config["team_codes"]
-if 'is_locked' not in st.session_state: st.session_state.is_locked = config["is_locked"]
+# 強制實時載入最新配置
+current_config = load_config_from_file()
 
 @st.cache_data
 def load_master_db():
-    if os.path.exists('players.csv'): return pd.read_csv('players.csv')
+    if os.path.exists('players.csv'):
+        return pd.read_csv('players.csv')
     return pd.DataFrame(columns=['name', 'utr_s', 'utr_d', 'gender'])
 
 master_df = load_master_db()
 
-# --- 2. 側邊欄 ---
+# --- 2. 側邊欄入口 ---
 st.sidebar.title("🎾 賽事數據中心")
 role = st.sidebar.selectbox("切換入口", ["隊長填單端", "總監管理端"])
 admin_pwd = st.sidebar.text_input("管理員密碼", type="password")
@@ -43,144 +44,191 @@ if role == "總監管理端":
     if admin_pwd != "666":
         st.info("🔒 請輸入密碼解鎖後台")
     else:
-        tab1, tab2 = st.tabs(["⚙️ 賽事設定", "🏆 戰績匯總榜"])
+        tab1, tab2 = st.tabs(["⚙️ 賽事設定與分配", "🏆 戰績匯總榜"])
         
         with tab1:
             col1, col2 = st.columns(2)
             with col1:
-                with st.expander("1. 名單與授權碼", expanded=True):
-                    team_in = st.text_input("隊伍 (逗號隔開)", "A隊, B隊, C隊, D隊")
+                with st.expander("1. 名單與授權碼生成", expanded=True):
+                    team_in = st.text_input("隊伍名稱 (逗號隔開)", "A隊, B隊, C隊, D隊")
                     active_teams = [t.strip() for t in team_in.split(",")]
-                    sel_players = st.multiselect("勾選今日選手", master_df['name'].tolist())
-                    if st.button("生成名單與隨機密碼"):
+                    
+                    all_player_names = master_df['name'].tolist()
+                    sel_players = st.multiselect("勾選今日到場選手", all_player_names)
+                    
+                    if st.button("✅ 建立名單並生成密碼"):
                         today_df = master_df[master_df['name'].isin(sel_players)].copy()
                         today_df['team'] = "未分配"
                         today_df.to_csv(TODAY_PLAYERS_FILE, index=False)
-                        st.session_state.team_codes = {t: str(random.randint(1000, 9999)) for t in active_teams}
-                        save_config(st.session_state.match_list, st.session_state.team_codes, st.session_state.is_locked)
-                        st.success("已生成！授權碼：" + str(st.session_state.team_codes))
+                        
+                        # 生成新密碼並直接寫入文件
+                        current_config["team_codes"] = {t: str(random.randint(1000, 9999)) for t in active_teams}
+                        save_config_to_file(current_config)
+                        st.success(f"已建立！授權碼：{current_config['team_codes']}")
 
             with col2:
-                with st.expander("2. 項目與鎖定", expanded=True):
-                    m_type = st.selectbox("新增項目", ["男單", "女单", "男双", "女双", "混双"])
-                    if st.button("➕ 新增項目"):
-                        st.session_state.match_list.append(m_type)
-                        save_config(st.session_state.match_list, st.session_state.team_codes, st.session_state.is_locked)
+                with st.expander("2. 比賽項目確認", expanded=True):
+                    m_type = st.selectbox("新增對撞項目", ["男單", "女单", "男双", "女双", "混双"])
+                    if st.button("➕ 確認新增項目"):
+                        current_config["match_list"].append(m_type)
+                        save_config_to_file(current_config)
+                        st.rerun() # 強制刷新顯示列表
                     
-                    st.session_state.is_locked = st.toggle("🔒 鎖定隊長修改", value=st.session_state.is_locked)
-                    if st.button("🗑️ 重置所有數據"):
-                        for f in [LINEUPS_FILE, CONFIG_FILE, RESULTS_FILE]: 
+                    st.write("**📝 本輪待賽項目：**")
+                    if current_config["match_list"]:
+                        for i, m in enumerate(current_config["match_list"]):
+                            st.text(f" {i+1}. {m}")
+                    else:
+                        st.caption("目前尚無項目")
+
+                    st.divider()
+                    current_config["is_locked"] = st.toggle("🔒 鎖定隊長修改", value=current_config["is_locked"])
+                    if st.button("💾 保存鎖定狀態"):
+                        save_config_to_file(current_config)
+                        st.toast("鎖定設置已保存")
+
+                    if st.button("🗑️ 重置/清空所有比賽"):
+                        for f in [LINEUPS_FILE, CONFIG_FILE, RESULTS_FILE, TODAY_PLAYERS_FILE]: 
                             if os.path.exists(f): os.remove(f)
                         st.rerun()
 
+            # 分配選手隊伍（獨立區塊）
             if os.path.exists(TODAY_PLAYERS_FILE):
-                with st.expander("3. 分配隊伍"):
-                    curr_today = pd.read_csv(TODAY_PLAYERS_FILE)
-                    updated = []
-                    for idx, row in curr_today.iterrows():
-                        t_idx = active_teams.index(row['team']) if row['team'] in active_teams else 0
-                        new_t = st.selectbox(f"{row['name']}", active_teams, index=t_idx, key=f"t_{row['name']}")
-                        updated.append([row['name'], row['utr_s'], row['utr_d'], row['gender'], new_t])
-                    if st.button("💾 保存分配"):
-                        pd.DataFrame(updated, columns=['name','utr_s','utr_d','gender','team']).to_csv(TODAY_PLAYERS_FILE, index=False)
-                        st.success("分配已同步")
+                st.subheader("3. 選手隊伍分配")
+                curr_today = pd.read_csv(TODAY_PLAYERS_FILE)
+                updated_rows = []
+                
+                # 取得當前設定的隊伍列表
+                current_teams = list(current_config["team_codes"].keys()) if current_config["team_codes"] else ["未分配"]
+                
+                c_idx = 0
+                cols = st.columns(3)
+                for idx, row in curr_today.iterrows():
+                    with cols[c_idx % 3]:
+                        t_idx = current_teams.index(row['team']) if row['team'] in current_teams else 0
+                        new_t = st.selectbox(f"選手: {row['name']}", current_teams, index=t_idx, key=f"sel_{row['name']}")
+                        updated_rows.append([row['name'], row['utr_s'], row['utr_d'], row['gender'], new_t])
+                    c_idx += 1
+                
+                if st.button("💾 確認送出隊伍分配", type="primary"):
+                    pd.DataFrame(updated_rows, columns=['name','utr_s','utr_d','gender','team']).to_csv(TODAY_PLAYERS_FILE, index=False)
+                    st.success("隊伍分配已存檔！隊長現在可以使用其授權碼登入。")
 
         with tab2:
-            st.subheader("📊 隊伍積分大榜")
+            st.subheader("📊 總戰績與積分榜")
             if os.path.exists(RESULTS_FILE):
                 res_df = pd.read_csv(RESULTS_FILE)
-                # 簡單匯總邏輯：勝場、總局數
-                summary = []
-                all_teams = active_teams if 'active_teams' in locals() else res_df['team_a'].unique()
-                for t in all_teams:
-                    t_wins = len(res_df[res_df['winner'] == t])
-                    t_challenges = len(res_df[(res_df['low_team'] == t) & (res_df['challenge'] == "成功")])
-                    summary.append({"隊伍": t, "勝場數": t_wins, "挑戰成功": t_challenges})
-                st.table(pd.DataFrame(summary))
+                st.dataframe(res_df, use_container_width=True)
             else:
-                st.info("暫無比分數據，請先在下方「刷新對撞結果」處填寫比分。")
+                st.info("暫無報分記錄")
 
-# --- 4. 隊長填單端 ---
+# --- 4. 隊長填單端 (核心修復：強制讀取最新項目) ---
 elif role == "隊長填單端":
-    st.header("📋 隊長排陣通道")
-    cur_conf = load_config()
-    if not os.path.exists(TODAY_PLAYERS_FILE) or not cur_conf["match_list"]:
-        st.warning("總監尚未發布比賽項目。")
+    st.header("📋 隊長填報系統")
+    
+    if not os.path.exists(TODAY_PLAYERS_FILE) or not current_config["match_list"]:
+        st.warning("⏳ 總監尚未完成名單分配或發布比賽項目，請稍候刷新。")
     else:
         today_df = pd.read_csv(TODAY_PLAYERS_FILE)
-        my_t = st.selectbox("選擇隊伍", ["請選擇"] + today_df['team'].unique().tolist())
-        pwd_in = st.text_input("授權碼", type="password")
+        teams_list = today_df['team'].unique().tolist()
+        if "未分配" in teams_list: teams_list.remove("未分配")
         
-        if my_t != "請選擇" and pwd_in == cur_conf["team_codes"].get(my_t):
-            if cur_conf["is_locked"]: st.error("鎖定中，無法修改")
+        my_t = st.selectbox("請選擇您的隊伍", ["請選擇"] + teams_list)
+        pwd_in = st.text_input("輸入該隊 4 位授權碼", type="password")
+        
+        if my_t != "請選擇" and pwd_in:
+            correct_code = current_config["team_codes"].get(my_t)
+            if pwd_in != correct_code:
+                st.error("❌ 授權碼錯誤")
+            elif current_config["is_locked"]:
+                st.error("🔒 總監已鎖定填報，無法再進行修改。")
             else:
-                with st.form(f"f_{my_t}"):
+                st.success(f"✅ 驗證成功！請填寫 {my_t} 的排陣單：")
+                my_players = today_df[today_df['team'] == my_t]['name'].tolist()
+                
+                with st.form(f"form_submit_{my_t}"):
                     picks = []
-                    for i, m in enumerate(cur_conf["match_list"]):
-                        st.write(f"場次 {i+1}: {m}")
-                        p_list = today_df[today_df['team'] == my_t]['name'].tolist()
+                    # 強制使用最新加載的 match_list
+                    for i, m_label in enumerate(current_config["match_list"]):
+                        st.markdown(f"**第 {i+1} 場：{m_label}**")
                         c1, c2 = st.columns(2)
-                        p1 = c1.selectbox("選手1", ["-"] + p_list, key=f"p1_{my_t}_{i}")
-                        p2 = c2.selectbox("選手2", ["-"] + p_list, key=f"p2_{my_t}_{i}") if "双" in m else "-"
-                        picks.append([my_t, i, m, p1, p2])
-                    if st.form_submit_button("提交排陣"):
+                        p1 = c1.selectbox("選手 1", ["-"] + my_players, key=f"p1_{my_t}_{i}")
+                        p2 = "-"
+                        if "双" in m_label:
+                            p2 = c2.selectbox("選手 2", ["-"] + my_players, key=f"p2_{my_t}_{i}")
+                        picks.append([my_t, i, m_label, p1, p2])
+                    
+                    if st.form_submit_button("📢 提交本輪點單"):
                         new_lineup = pd.DataFrame(picks, columns=['team','match_id','type','p1','p2'])
                         if os.path.exists(LINEUPS_FILE):
                             old = pd.read_csv(LINEUPS_FILE)
                             new_lineup = pd.concat([old[old['team'] != my_t], new_lineup])
                         new_lineup.to_csv(LINEUPS_FILE, index=False)
-                        st.success("提交完成！")
+                        st.balloons()
+                        st.success(f"{my_t} 點單已成功送出！")
 
-# --- 5. 對撞結果與賽後報分 ---
+# --- 5. 對撞與報分結果顯示 ---
 st.divider()
-if st.button("🚀 刷新對撞榜與報分單"):
+if st.button("🧨 顯示/刷新對撞結果與報分"):
     if os.path.exists(LINEUPS_FILE) and os.path.exists(TODAY_PLAYERS_FILE):
         all_l = pd.read_csv(LINEUPS_FILE)
         t_info = pd.read_csv(TODAY_PLAYERS_FILE)
         
-        for mid in range(len(st.session_state.match_list)):
-            m_type = st.session_state.match_list[mid]
+        st.header("⚡ 實時對撞數據")
+        
+        # 遍歷總監設定的項目
+        for mid in range(len(current_config["match_list"])):
+            m_label = current_config["match_list"][mid]
             m_data = all_l[all_l['match_id'] == mid]
-            if len(m_data) < 2: continue
             
-            st.subheader(f"場次 {mid+1}：{m_type}")
+            if len(m_data) < 2:
+                st.info(f"第 {mid+1} 場 ({m_label}): 等待對手提交中...")
+                continue
+            
+            st.subheader(f"場次 {mid+1}：{m_label}")
             teams = m_data['team'].tolist()
-            # 這裡簡化為前兩隊對撞
-            t1, t2 = teams[0], teams[1]
-            r1, r2 = m_data[m_data['team']==t1].iloc[0], m_data[m_data['team']==t2].iloc[0]
-            
-            u1 = t_info[t_info['name'].isin([r1['p1'], r1['p2']])]['utr_d' if "双" in m_type else 'utr_s'].mean()
-            u2 = t_info[t_info['name'].isin([r2['p1'], r2['p2']])]['utr_d' if "双" in m_type else 'utr_s'].mean()
-            diff = abs(u1 - u2)
-            target = 5 if diff<=0.5 else 4 if diff<=1.0 else 3 if diff<=1.5 else 2 if diff<=2.0 else 1
-            low_t = t1 if u1 < u2 else t2
-            
-            # 顯示對撞詳情
-            st.info(f"【{t1} UTR:{u1:.2f}】 vs 【{t2} UTR:{u2:.2f}】 | 低分方【{low_t}】目標：{target} 局")
-            
-            # --- 賽後報分區 ---
-            with st.expander(f"📝 輸入第 {mid+1} 場比分"):
-                c1, c2, c3 = st.columns(3)
-                score1 = c1.number_input(f"{t1} 局數", min_value=0, max_value=10, key=f"s1_{mid}")
-                score2 = c2.number_input(f"{t2} 局數", min_value=0, max_value=10, key=f"s2_{mid}")
-                if c3.button("儲存比分", key=f"btn_{mid}"):
-                    winner = t1 if score1 > score2 else t2 if score2 > score1 else "平手"
-                    # 判斷挑戰是否成功
-                    low_score = score1 if low_t == t1 else score2
-                    challenge = "成功" if low_score >= target else "失敗"
-                    
-                    res_row = pd.DataFrame([[mid, t1, t2, score1, score2, winner, low_t, target, challenge]], 
-                                         columns=['mid','team_a','team_b','sc_a','sc_b','winner','low_team','target','challenge'])
-                    if os.path.exists(RESULTS_FILE):
-                        old_res = pd.read_csv(RESULTS_FILE)
-                        res_row = pd.concat([old_res[old_res['mid'] != mid], res_row])
-                    res_row.to_csv(RESULTS_FILE, index=False)
-                    st.toast(f"場次 {mid+1} 比分已錄入！挑戰{challenge}")
-            
-            # 顯示已錄入的分數
-            if os.path.exists(RESULTS_FILE):
-                this_res = pd.read_csv(RESULTS_FILE)
-                match_res = this_res[this_res['mid'] == mid]
-                if not match_res.empty:
-                    st.success(f"比分：{match_res.iloc[0]['sc_a']} : {match_res.iloc[0]['sc_b']} ({match_res.iloc[0]['challenge']})")
+            # 兩兩對撞
+            for k in range(0, len(teams)-1, 2):
+                t1, t2 = teams[k], teams[k+1]
+                r1 = m_data[m_data['team']==t1].iloc[0]
+                r2 = m_data[m_data['team']==t2].iloc[0]
+                
+                # 計算 UTR
+                def get_utr(names, mt):
+                    active = [n for n in names if n != "-"]
+                    res = t_info[t_info['name'].isin(active)]
+                    return res['utr_d' if "双" in mt else 'utr_s'].mean(), active
+
+                u1, n1 = get_utr([r1['p1'], r1['p2']], m_label)
+                u2, n2 = get_utr([r2['p1'], r2['p2']], m_label)
+                
+                diff = abs(u1 - u2)
+                target = 5 if diff<=0.5 else 4 if diff<=1.0 else 3 if diff<=1.5 else 2 if diff<=2.0 else 1
+                low_t = t1 if u1 < u2 else t2
+
+                c1, c2, c3 = st.columns([2, 1, 2])
+                with c1: st.metric(t1, f"{u1:.2f}", f"{', '.join(n1)}")
+                with c2: st.markdown("### VS")
+                with c3: st.metric(t2, f"{u2:.2f}", f"{', '.join(n2)}")
+                
+                st.warning(f"🎯 低分方【{low_t}】目標局數：{target} 局 (分差 {diff:.2f})")
+                
+                # 實時報分組件
+                with st.expander(f"📝 錄入比分 (第 {mid+1} 場)"):
+                    sc1 = st.number_input(f"{t1} 局數", 0, 10, key=f"score1_{mid}")
+                    sc2 = st.number_input(f"{t2} 局數", 0, 10, key=f"score2_{mid}")
+                    if st.button(f"提交比分 #{mid}", key=f"save_{mid}"):
+                        winner = t1 if sc1 > sc2 else t2 if sc2 > sc1 else "平"
+                        low_sc = sc1 if low_t == t1 else sc2
+                        challenge = "成功" if low_sc >= target else "失敗"
+                        
+                        res_data = pd.DataFrame([[mid, m_label, t1, t2, sc1, sc2, winner, challenge]], 
+                                              columns=['mid','type','t1','t2','s1','s2','winner','challenge'])
+                        if os.path.exists(RESULTS_FILE):
+                            old_res = pd.read_csv(RESULTS_FILE)
+                            res_data = pd.concat([old_res[old_res['mid'] != mid], res_data])
+                        res_data.to_csv(RESULTS_FILE, index=False)
+                        st.success(f"已儲存！挑戰結果：{challenge}")
             st.divider()
+    else:
+        st.info("數據尚未準備就緒。")
