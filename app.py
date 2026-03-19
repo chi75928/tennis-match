@@ -1,100 +1,124 @@
 import streamlit as st
 import pandas as pd
-import os
 
-# --- 1. 核心數據庫模擬 (對接截圖資料) ---
-def init_db():
-    data = {
-        'nickname': ['本吹提要次西瓜', '香云', 'Tiff', 'MP_IYDUHP', '天空', '小昊', '黑Sir', '瑞德勒'],
-        'real_name': ['姜浩', '毕彩云', 'Tiff', '钱佳宁', '李光宇', '吴园园', '樊志海', '杨瑞'],
-        'utr_name': ['John jiang', 'caiyun bi', 'tian tiff', 'jianing qian', 'guangyu li', 'yuanyuan wu', 'zhihai fan', 'rui yang'],
-        'email': ['jianghao36@163.com', '297774997@qq.com', '464495858@qq.com', '8611605@qq.com', '18915599771@189.cn', '18502134025@163.com', '123970381@qq.com', '527887451@qq.com'],
-        'utr_s': [4.66, 1.00, 1.00, 1.00, 2.50, 1.00, 1.00, 2.85],
-        'utr_d': [2.00, 1.00, 1.00, 1.00, 3.86, 1.00, 1.00, 1.00],
-        'region': ['江苏省 苏州市', '吉林省 长春市', '江苏省 苏州市', '浙江省 嘉兴市', '江苏省 苏州市', '上海市 静安区', '福建省 福州市', '江苏省 苏州市'],
-        'status': ['已認證'] * 8,
-        'club': ['無', '海德網球社', '無', '無', '威爾森精英隊', '無', '耐克之星', '無'],
-        'contribution': [0.0, 500.0, 0.0, 0.0, 350.0, 0.0, 420.0, 0.0]
+# --- 1. 核心數據初始化 ---
+def init_all_data():
+    # 選手數據庫 (增加個人累計聲望欄位)
+    p_data = {
+        'nickname': ['本吹提要次西瓜', '香云', 'Tiff', '天空', 'Admin'],
+        'email': ['jianghao36@163.com', '297774997@qq.com', '464495858@qq.com', '18915599771@189.cn', 'admin@mptennis.com'],
+        'utr_s': [4.66, 1.00, 1.00, 2.50, 13.00],
+        'utr_d': [2.00, 1.00, 1.00, 3.86, 13.00],
+        'region': ['江蘇省 蘇州市', '吉林省 長春市', '江蘇省 蘇州市', '江蘇省 蘇州市', '全中國'],
+        'club': ['無', '海德網球社', '無', '威爾森精英隊', '系統'],
+        'p_prestige': [0.00, 0.00, 0.00, 0.00, 0.00], # 個人貢獻分
+        'role': ['player', 'player', 'player', 'player', 'admin']
     }
-    return pd.DataFrame(data)
+    # 俱樂部數據庫
+    c_data = {
+        'club_name': ['海德網球社', '威爾森精英隊', '耐克之星', '系統'],
+        'total_prestige': [50.00, 35.00, 10.00, 999.99],
+        'founder': ['香云', '天空', '管理員', 'Admin']
+    }
+    return pd.DataFrame(p_data), pd.DataFrame(c_data)
 
-# --- 2. 初始化環境 ---
-st.set_page_config(page_title="MP Tennis Pro", layout="wide")
+st.set_page_config(page_title="MP Tennis Pro Control", layout="wide")
 
-if 'db' not in st.session_state:
-    st.session_state.db = init_db()
+if 'p_db' not in st.session_state:
+    st.session_state.p_db, st.session_state.c_db = init_all_data()
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 
-# --- 3. 側邊欄：郵箱登入 ---
-st.sidebar.title("🎾 MP Tennis 登入")
+# --- 2. 登入系統 ---
 if not st.session_state.logged_in:
-    with st.sidebar.form("login"):
-        u_email = st.text_input("輸入 UTR 註冊郵箱 (搜索實力用)")
-        u_pw = st.text_input("輸入密碼 (保護帳號用)", type="password")
-        if st.form_submit_button("登入 / 驗證"):
-            if u_email in st.session_state.db['email'].values:
-                st.session_state.logged_in = True
-                st.session_state.user_email = u_email
-                st.rerun()
-            else:
-                st.error("郵箱未關聯 UTR，請聯繫總監")
+    st.sidebar.title("🔐 MP Tennis 登入")
+    login_mail = st.sidebar.text_input("輸入 UTR 註冊郵箱")
+    if st.sidebar.button("確認登入"):
+        if login_mail in st.session_state.p_db['email'].values:
+            st.session_state.logged_in = True
+            st.session_state.user_email = login_mail
+            st.rerun()
+        else:
+            st.sidebar.error("郵箱未關聯，請聯繫總監")
     st.stop()
-else:
-    user = st.session_state.db[st.session_state.db['email'] == st.session_state.user_email].iloc[0]
-    st.sidebar.success(f"已登入: {user['nickname']}")
-    if st.sidebar.button("登出"):
-        st.session_state.logged_in = False
-        st.rerun()
 
-# --- 4. 主介面展示 ---
-st.header(f"👋 {user['nickname']} (UTR名稱: {user['utr_name']})")
-c1, c2, c3 = st.columns(3)
-c1.metric("單打 UTR", user['utr_s'])
-c2.metric("雙打 UTR", user['utr_d'])
-c3.metric("所屬地區", user['region'])
+user = st.session_state.p_db[st.session_state.p_db['email'] == st.session_state.user_email].iloc[0]
 
-# --- 5. 核心模組跳轉 ---
+# --- 3. 頂部導航 ---
+st.markdown(f"### 👋 {user['nickname']} (ID: {user['email']})")
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("單打 UTR", f"{user['utr_s']:.2f}")
+c2.metric("雙打 UTR", f"{user['utr_d']:.2f}")
+c3.metric("個人聲望", f"{user['p_prestige']:.2f}")
+c4.write(f"📍 地區: {user['region']}")
+
+if user['role'] == 'admin':
+    st.success("👑 超級管理員模式：已解鎖全局數據錄入權限")
+
+st.divider()
+
+# --- 4. 三大核心板塊 ---
 tab1, tab2, tab3 = st.tabs(["🏆 實力榜單", "🛡️ 俱樂部管理", "⚔️ 賽事中心"])
 
+# ----- 模組一：實力榜單 (保留兩位小數) -----
 with tab1:
-    st.subheader("🌏 全國 / 地區 UTR 實力排名")
-    scope = st.selectbox("地區篩選", ["全國", "江苏省", "上海市", "浙江省", "吉林省"])
-    utr_type = st.radio("排序依據", ["單打", "雙打"], horizontal=True)
-    
-    r_df = st.session_state.db.copy()
-    if scope != "全國": r_df = r_df[r_df['region'].str.contains(scope)]
-    
-    sort_key = 'utr_s' if utr_type == "單打" else 'utr_d'
-    r_df = r_df.sort_values(by=sort_key, ascending=False).reset_index(drop=True)
-    r_df.index += 1
-    st.table(r_df[['nickname', 'utr_name', 'utr_s', 'utr_d', 'region', 'club']])
+    st.subheader("🌏 全國 UTR 實力排名")
+    r_df = st.session_state.p_db.sort_values(by='utr_s', ascending=False).copy()
+    # 格式化顯示
+    r_df['utr_s'] = r_df['utr_s'].map('{:.2f}'.format)
+    r_df['utr_d'] = r_df['utr_d'].map('{:.2f}'.format)
+    r_df['p_prestige'] = r_df['p_prestige'].map('{:.2f}'.format)
+    st.table(r_df[['nickname', 'utr_s', 'utr_d', 'region', 'club', 'p_prestige']])
 
+# ----- 模組二：俱樂部管理 (聲望排行) -----
 with tab2:
-    st.subheader("🛡️ 俱樂部聲望中心")
+    st.subheader("🛡️ 俱樂部聲望排行榜")
+    c_rank = st.session_state.c_db.sort_values(by='total_prestige', ascending=False).copy()
+    c_rank['total_prestige'] = c_rank['total_prestige'].map('{:.2f}'.format)
+    st.dataframe(c_rank, use_container_width=True)
+    
     if user['club'] == "無":
-        st.warning("目前無俱樂部")
         st.button("🔍 申請加入 / ➕ 創建俱樂部")
     else:
-        st.success(f"目前俱樂部：{user['club']} | 貢獻值：{user['contribution']}")
-        if st.button("❌ 退出俱樂部", help="聲望將歸零"):
-            idx = st.session_state.db[st.session_state.db['email'] == st.session_state.user_email].index
-            st.session_state.db.loc[idx, 'club'] = "無"
-            st.session_state.db.loc[idx, 'contribution'] = 0.0
+        st.info(f"您目前所屬：{user['club']}")
+        if st.button("❌ 退出俱樂部 (個人貢獻與聲望將重置)"):
+            st.session_state.p_db.loc[st.session_state.p_db['email']==user['email'], 'club'] = "無"
+            st.session_state.p_db.loc[st.session_state.p_db['email']==user['email'], 'p_prestige'] = 0.00
             st.rerun()
 
+# ----- 模組三：賽事中心 (勝利平分邏輯) -----
 with tab3:
-    st.subheader("⚔️ 團體對抗賽 (對撞補償)")
-    role = st.toggle("切換為 總監管理端", False)
+    st.header("⚔️ 賽事比分與積分錄入")
     
-    if role:
-        st.info("🛠️ 總監後台：發布賽制、錄入比分、審核報名")
-    else:
-        st.info("🚩 隊長端：預估補償分")
-        opp_utr = st.slider("預計對手平均 UTR", 1.0, 13.0, 6.0)
+    if user['role'] != 'admin':
+        st.warning("🔒 只有總監/超級管理員能錄入積分。")
+        # 隊長預覽對撞
+        opp_utr = st.slider("對手平均 UTR", 1.00, 13.00, 5.00)
         diff = abs(user['utr_s'] - opp_utr)
-        # 對撞階梯
         target = 5 if diff <= 0.5 else 4 if diff <= 1.0 else 3 if diff <= 1.5 else 2 if diff <= 2.0 else 1
-        st.success(f"💡 對撞結果：我方單打為 {user['utr_s']}，分差 {diff:.2f}。低分方目標：{target} 局")
-
-st.caption("MP Tennis 2026 | UTR 實力導向賽事系統")
+        st.success(f"對撞預測：分差 {diff:.2f}，低分方目標為 {target} 局。")
+    else:
+        st.write("🛠️ **超級管理員錄入專區**")
+        with st.form("match_record"):
+            win_club = st.selectbox("獲勝俱樂部", st.session_state.c_db['club_name'].tolist())
+            match_type = st.radio("比賽性質", ["普通比分 (+1)", "V-UTR 認證比分 (+3)", "趣味對撞賽勝利 (+10)"])
+            
+            # 獲勝球員選擇 (用於平分 10 分)
+            club_members = st.session_state.p_db[st.session_state.p_db['club'] == win_club]['nickname'].tolist()
+            winners = st.multiselect("選擇本次參賽獲勝球員 (平分勝利分數)", club_members)
+            
+            if st.form_submit_button("📢 確認結算"):
+                points = 1.0 if "普通" in match_type else 3.0 if "V-UTR" in match_type else 10.0
+                
+                # 1. 更新俱樂部總分
+                st.session_state.c_db.loc[st.session_state.c_db['club_name']==win_club, 'total_prestige'] += points
+                
+                # 2. 更新個人分數 (平分邏輯)
+                if winners:
+                    per_person_points = points / len(winners)
+                    for w_name in winners:
+                        st.session_state.p_db.loc[st.session_state.p_db['nickname']==w_name, 'p_prestige'] += per_person_points
+                    st.success(f"結算完成！{win_club} 總分 +{points:.2f}。球員 {', '.join(winners)} 每人各獲 +{per_person_points:.2f} 分。")
+                else:
+                    st.warning("未選擇參賽球員，僅更新俱樂部總分。")
+                st.rerun()
