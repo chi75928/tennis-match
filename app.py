@@ -35,12 +35,11 @@ def load_config():
 
 current_config = load_config()
 
-# --- 數據加載修復：處理 UTR 格式與語法 ---
+# --- 數據加載修復 ---
 @st.cache_data
 def load_master_db():
     if os.path.exists('players.csv'):
         df = pd.read_csv('players.csv')
-        # 將 UTR 欄位強制轉為數字，防止出現文字導致崩潰
         df['utr_s'] = pd.to_numeric(df['utr_s'], errors='coerce').fillna(0.0)
         df['utr_d'] = pd.to_numeric(df['utr_d'], errors='coerce').fillna(0.0)
         return df
@@ -68,7 +67,7 @@ if role == "總監管理端":
             with c1:
                 with st.expander("基礎對戰設定", expanded=True):
                     team_in = st.text_input("隊伍名稱", "A隊, B隊, C隊, D隊", disabled=not allow_edit)
-                    m_order = st.text_input("對戰順序 (例如: 小左 vs Gary)", current_config["match_order"], disabled=not allow_edit)
+                    m_order = st.text_input("對戰順序", current_config["match_order"], disabled=not allow_edit)
                     c_num = st.text_input("場地號碼", current_config["court_num"], disabled=not allow_edit)
                     sel_p = st.multiselect("勾選今日選手", master_df['name'].tolist(), disabled=not allow_edit)
                     
@@ -96,7 +95,7 @@ if role == "總監管理端":
                         updated = []
                         for i, row in curr_today.iterrows():
                             t_idx = teams.index(row['team']) if row['team'] in teams else 0
-                            nt = st.selectbox(f"{row['name']}", teams, index=t_idx, disabled=not allow_edit)
+                            nt = st.selectbox(f"{row['name']}", teams, index=t_idx, key=f"assign_{row['name']}", disabled=not allow_edit)
                             updated.append([row['name'], row['utr_s'], row['utr_d'], row['gender'], nt])
                         if st.form_submit_button("🔒 鎖定分隊名單"):
                             pd.DataFrame(updated, columns=['name','utr_s','utr_d','gender','team']).to_csv(FILES["today"], index=False)
@@ -125,7 +124,8 @@ if role == "總監管理端":
             if st.button("保存鎖定"): save_config(current_config)
 
         elif admin_tab == "3. 戰績匯總":
-            if os.path.exists(FILES["results"]): st.dataframe(pd.read_csv(FILES["results"]))
+            if os.path.exists(FILES["results"]): 
+                st.dataframe(pd.read_csv(FILES["results"]), use_container_width=True)
             else: st.info("無數據")
 
 # --- 4. 隊長端 ---
@@ -160,7 +160,7 @@ elif role == "隊長填單端":
                         df.to_csv(FILES["lineups"], index=False)
                         st.success("提交成功")
 
-# --- 5. 對撞結果與報分區 (直接顯示選手名) ---
+# --- 5. 對撞結果與報分區 ---
 st.divider()
 if st.button("🧨 刷新對撞與報分"):
     st.session_state.show_res = True
@@ -176,7 +176,6 @@ if st.session_state.get("show_res"):
                 r1, r2 = m_data.iloc[0], m_data.iloc[1]
                 
                 u_col = 'utr_d' if "双" in m_label else 'utr_s'
-                # 確保 UTR 是數字
                 t_info[u_col] = pd.to_numeric(t_info[u_col], errors='coerce').fillna(0.0)
                 
                 u1 = t_info[t_info['name'].isin([r1['p1'], r1['p2']])][u_col].mean()
@@ -184,9 +183,10 @@ if st.session_state.get("show_res"):
                 
                 diff = abs(u1 - u2)
                 target = 5 if diff<=0.5 else 4 if diff<=1.0 else 3 if diff<=1.5 else 2 if diff<=2.0 else 1
-                low_t = t1 if u1 < u2 else t2
+                
+                # 區分高低分方
+                low_t, high_t = (t1, t2) if u1 < u2 else (t2, t1)
 
-                # --- 核心視覺修復：直觀顯示選手名字 ---
                 col_l, col_m, col_r = st.columns([2, 1, 2])
                 with col_l:
                     st.markdown(f"### {t1}")
@@ -208,14 +208,19 @@ if st.session_state.get("show_res"):
                     s1 = c1.number_input(f"{t1} 局數", 0, 10, key=f"s1_{mid}")
                     s2 = c2.number_input(f"{t2} 局數", 0, 10, key=f"s2_{mid}")
                     if st.form_submit_button("💾 儲存比分"):
-                        win = t1 if s1 > s2 else t2 if s2 > s1 else "平"
-                        low_sc = s1 if low_t == t1 else s2
-                        chal = "成功" if low_sc >= target else "失敗"
-                        res = pd.DataFrame([[mid+1, m_label, t1, t2, s1, s2, win, chal]], 
+                        win_actual = t1 if s1 > s2 else t2 if s2 > s1 else "平"
+                        low_score = s1 if low_t == t1 else s2
+                        
+                        # --- 修改後的 Challenge 邏輯 ---
+                        # 挑戰成功顯示低分方名稱，失敗顯示高分方名稱
+                        challenge_winner = low_t if low_score >= target else high_t
+                        
+                        res = pd.DataFrame([[mid+1, m_label, t1, t2, s1, s2, win_actual, challenge_winner]], 
                                          columns=['mid','type','t1','t2','s1','s2','winner','challenge'])
+                        
                         if os.path.exists(FILES["results"]):
-                            old = pd.read_csv(FILES["results"])
-                            res = pd.concat([old[old['mid'] != (mid+1)], res])
+                            old_res = pd.read_csv(FILES["results"])
+                            res = pd.concat([old_res[old_res['mid'] != (mid+1)], res])
                         res.to_csv(FILES["results"], index=False)
-                        st.success(f"存檔成功！挑戰{chal}")
+                        st.success(f"存檔成功！本場挑戰結果：{challenge_winner}")
                 st.divider()
