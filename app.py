@@ -36,12 +36,30 @@ def load_config():
 current_config = load_config()
 
 @st.cache_data
+def @st.cache_data
 def load_master_db():
+    if os.path.exists('players.csv'):
+        df = pd.read_csv('players.csv')
+        # 核心修改：強制轉換 UTR 欄位，非法字元轉為 0.0，避免 mean() 崩潰
+        df['utr_s'] = pd.to_numeric(df['utr_s'], errors='coerce').fillna(0.0)
+        df['utr_d'] = pd.to_numeric(df['utr_d'], errors='coerce').fillna(0.0)
+        return df
+    return pd.DataFrame(columns=['name', 'utr_s', 'utr_d', 'gender'])
+():
     if os.path.exists('players.csv'):
         return pd.read_csv('players.csv')
     return pd.DataFrame(columns=['name', 'utr_s', 'utr_d', 'gender'])
 
-master_df = load_master_db()
+master_df = @st.cache_data
+def load_master_db():
+    if os.path.exists('players.csv'):
+        df = pd.read_csv('players.csv')
+        # 核心修改：強制轉換 UTR 欄位，非法字元轉為 0.0，避免 mean() 崩潰
+        df['utr_s'] = pd.to_numeric(df['utr_s'], errors='coerce').fillna(0.0)
+        df['utr_d'] = pd.to_numeric(df['utr_d'], errors='coerce').fillna(0.0)
+        return df
+    return pd.DataFrame(columns=['name', 'utr_s', 'utr_d', 'gender'])
+()
 
 # --- 2. 側邊欄與權限 ---
 st.sidebar.title("🎾 賽事管理終端")
