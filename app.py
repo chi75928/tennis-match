@@ -232,8 +232,21 @@ if st.session_state.get("show_results"):
                 
                 # 2. 根據比賽類型計算平均 UTR (單打用 s, 雙打用 d)
                 utr_col = 'utr_d' if "双" in m_label else 'utr_s'
-                u1 = t_info[t_info['name'].isin(p1_list)][utr_col].mean()
-                u2 = t_info[t_info['name'].isin(p2_list)][utr_col].mean()
+                                # --- 強制轉換 UTR 為數字類型，避免報錯 ---
+                # 使用 pd.to_numeric 並設置 errors='coerce'，會把無法轉換的文字變成 NaN
+                t_info[utr_col] = pd.to_numeric(t_info[utr_col], errors='coerce')
+
+                # 提取選手並計算平均值（自動忽略 NaN）
+                u1_series = t_info[t_info['name'].isin(p1_list)][utr_col]
+                u2_series = t_info[t_info['name'].isin(p2_list)][utr_col]
+                
+                u1 = u1_series.mean()
+                u2 = u2_series.mean()
+
+                # 防止出現空值導致後續計算失敗
+                if pd.isna(u1): u1 = 0.0
+                if pd.isna(u2): u2 = 0.0
+
                 
                 # 3. 計算差距與目標局數 (保本策略邏輯)
                 diff = abs(u1 - u2)
